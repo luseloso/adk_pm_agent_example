@@ -1,0 +1,5 @@
+# Google ADK and Vertex AI
+google-cloud-aiplatform[adk,agent_engines]>=1.112
+
+# Additional dependencies
+requests>=2.31.0
