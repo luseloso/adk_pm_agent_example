@@ -1,196 +1,171 @@
-# Local Testing with ADK Web
+# Local Testing Guide
 
-This guide explains how to test the PM Agent locally using the ADK web interface.
+Test the PM Agent locally using the ADK web interface before deploying.
 
 ## Prerequisites
 
-- ADK CLI installed (`pip install google-cloud-aiplatform[adk]`)
-- Python 3.10-3.13
-- All dependencies from `requirements.txt` installed in your environment
+- ADK CLI: `pip install google-cloud-aiplatform[adk,agent_engines]`
+- Python 3.11+
+- Dependencies installed: `pip install -r requirements.txt`
 
-## Current Setup Status
+## Quick Start
 
-✅ **Fixed**: Updated `pm_agent/__init__.py` to use relative imports (`.agent` instead of `agent`)
-✅ **Server Running**: ADK web server is running on port 8080
-⚠️ **Note**: The ADK CLI uses its own Python environment, which may differ from your current environment
-
-## Starting the ADK Web Interface
-
-### Method 1: Using ADK CLI (Current Approach)
-
-From the project root directory:
+From the repository root:
 
 ```bash
-cd /Users/your-project-id/Documents/agents/product-management-agent
-
-# Start the web server (pointing to current directory which contains pm_agent/)
+cd pm_agent
 adk web . --port 8080
 ```
 
-The server will start at: **http://127.0.0.1:8080**
+Open browser to `http://127.0.0.1:8080`
 
-### Method 2: With Virtual Environment
+## Testing Workflow
 
-If you have a virtual environment with ADK installed:
+### 1. Start ADK Web Server
 
 ```bash
-# Activate your virtual environment
-source venv/bin/activate  # or your venv path
-
-# Install dependencies if not already installed
-pip install -r requirements.txt
-
-# Start ADK web
-adk web . --port 8080
+# From repository root
+adk web pm_agent --port 8080 --reload_agents
 ```
 
-## Using the Web Interface
+The `--reload_agents` flag enables hot-reloading when you modify agent code.
 
-1. **Open your browser** to http://127.0.0.1:8080
-2. **Select the pm_agent** from the available agents
-3. **Start a conversation** with a product idea, for example:
-   ```
-   I want to build a mobile app for fitness tracking that helps users:
-   - Track their daily workouts and nutrition
-   - Set and monitor fitness goals
-   - Connect with fitness coaches
-   - Join community challenges
-   ```
+### 2. Test Product Ideas
 
-4. **Watch the agent work** through three stages:
-   - **Market Research**: Uses Google Search to analyze the problem space
-   - **User Journey Mapping**: Creates personas and user journeys
-   - **PRD Generation**: Compiles everything into a structured PRD
+Try these example prompts:
 
-## Troubleshooting
-
-### "No agents found" Warning
-
-**Cause**: The agent module can't be imported, usually due to:
-- Wrong Python environment
-- Missing dependencies
-- Import errors in the code
-
-**Solution**:
-1. Ensure ADK packages are installed in the Python environment being used
-2. Check that `pm_agent/__init__.py` uses relative imports (`.agent`)
-3. Verify `agent.py` can be imported:
-   ```bash
-   python3 -c "from pm_agent import root_agent; print(root_agent.name)"
-   ```
-
-### Port Already in Use
-
-**Error**: `[errno 48] address already in use`
-
-**Solution**: Use a different port
-```bash
-adk web . --port 8081  # or any other available port
+**Basic PRD Creation**:
+```
+Create a PRD for a mobile fitness tracking app
 ```
 
-### Import Errors
+**With Specifics**:
+```
+I want to build a productivity app that helps remote workers:
+- Track deep work sessions
+- Block distracting websites
+- Integrate with calendar
+- Provide daily insights
+```
 
-**Error**: `ModuleNotFoundError: No module named 'google'`
+### 3. Test HITL Workflows
 
-**Cause**: ADK packages not installed in the current Python environment
+**Duplicate Detection**:
+1. Create a PRD for "fitness tracking app"
+2. Try creating another similar PRD
+3. Agent should detect duplicate and ask what to do
 
-**Solution**:
+**PRD Approval**:
+1. Complete a PRD generation
+2. Agent presents PRD and asks for confirmation
+3. Respond with "yes" to save or ask for refinements
+
+## Environment Configuration
+
+### For Local Testing Only
+
 ```bash
-pip install google-cloud-aiplatform[adk,agent_engines]>=1.112
+# In pm_agent directory
+cp .env.example .env
+
+# Minimal config for local testing:
+GOOGLE_GENAI_USE_VERTEXAI=1
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+```
+
+### For Testing with MCP Server
+
+To test with actual PRD storage:
+
+```bash
+# Ensure MCP server is deployed first
+# Then add to .env:
+MCP_SERVER_URL=https://your-mcp-server.run.app
+
+# For authentication:
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
 ```
 
 ## ADK Web CLI Options
 
-Useful options for local testing:
-
 ```bash
-# Enable verbose logging
-adk web . --port 8080 --verbose
-
-# Enable auto-reload on code changes
-adk web . --port 8080 --reload --reload_agents
+# Auto-reload on code changes
+adk web pm_agent --port 8080 --reload_agents
 
 # Enable cloud tracing (requires GCP auth)
-adk web . --port 8080 --trace_to_cloud
+adk web pm_agent --port 8080 --trace_to_cloud
+
+# Verbose logging
+adk web pm_agent --port 8080 --verbose
 ```
 
-## Alternative: Python-Based Local Testing
+## Troubleshooting
 
-If `adk web` doesn't work, you can test with a simple Python script:
+### "No agents found"
 
-```python
-#!/usr/bin/env python3
-import vertexai
-from pm_agent import root_agent
+**Cause**: Module import error
 
-# For local testing without deployment
-print(f"Testing {root_agent.name}")
-print(f"Model: {root_agent.model}")
-print(f"Sub-agents: {len(root_agent.sub_agents)}")
-
-# Note: Full execution requires deployment to Agent Engine
-# This just validates the agent structure
-```
-
-Save as `local_structure_test.py` and run:
+**Solution**:
 ```bash
-python local_structure_test.py
+# Verify agent can be imported
+python3 -c "from pm_agent import root_agent; print(root_agent.name)"
+
+# Should output: root_agent
 ```
 
-## Best Practices for Local Testing
+### Port Already in Use
 
-1. **Use `--reload_agents`** during development to see changes without restarting
-2. **Test with realistic product ideas** to validate the full workflow
-3. **Check logs** for errors or warnings during execution
-4. **Verify Google Search** is working (requires internet connection)
-5. **Compare outputs** with the deployed version to ensure consistency
+**Error**: `address already in use`
 
-## Environment Variables
-
-For local testing with cloud features:
-
+**Solution**:
 ```bash
-export GOOGLE_CLOUD_PROJECT=your-project-id
-export GOOGLE_CLOUD_LOCATION=us-central1
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+# Use different port
+adk web pm_agent --port 8081
+
+# Or kill existing process
+lsof -ti:8080 | xargs kill -9
 ```
 
-Then start with cloud features:
+### MCP Server Connection Errors
 
-```bash
-adk web . --port 8080 --trace_to_cloud
-```
+**Error**: Connection refused when calling MCP tools
 
-## Current Server Status
+**Solutions**:
+1. Verify MCP_SERVER_URL in `.env`
+2. Check MCP server is running:
+   ```bash
+   curl https://your-mcp-server.run.app/health
+   ```
+3. Verify authentication (service account permissions)
 
-A server is currently running at http://127.0.0.1:8080
-
-To stop it:
-- Press `Ctrl+C` in the terminal where it's running
-- Or find and kill the process:
-  ```bash
-  lsof -ti:8080 | xargs kill -9
-  ```
-
-## Comparing Local vs Deployed
+## Comparing Local vs. Deployed
 
 | Feature | Local (adk web) | Deployed (Agent Engine) |
-|---------|----------------|------------------------|
-| Speed | Faster (local execution) | Network latency |
-| Memory | In-memory only | Persistent with VertexAiMemoryBankService |
-| Tracing | Optional (--trace_to_cloud) | Always enabled |
+|---------|----------------|-------------------------|
+| Speed | Faster | Network latency |
+| Storage | Temporary (no persistence) | Persists to GCS |
+| Tracing | Optional | Always enabled |
 | Cost | Free (local compute) | GCP charges |
-| Collaboration | Single user | Multi-user sessions |
+| Collaboration | Single user | Multi-user |
+
+## Validating Changes
+
+Before deploying updates:
+
+1. **Test the full workflow** - Create PRD end-to-end
+2. **Test error cases** - Try invalid inputs
+3. **Test HITL points** - Verify both confirmation points work
+4. **Check logs** - Look for errors or warnings
+5. **Compare outputs** - Ensure PRD quality is maintained
 
 ## Next Steps
 
-- Test the agent thoroughly with various product ideas
-- Compare results with deployed version
-- Iterate on agent instructions and logic
-- Deploy updates when satisfied with local testing
+- Deploy changes: See [Deployment Guide](DEPLOYMENT.md)
+- Understand architecture: See [Architecture Documentation](ARCHITECTURE.md)
+- Try examples: See [Examples](../examples/)
 
 ## References
 
 - [ADK CLI Documentation](https://google.github.io/adk-docs/cli/)
-- [ADK Web Interface Guide](https://google.github.io/adk-docs/deploy/local/)
-- [Architecture Documentation](ARCHITECTURE.md)
+- [ADK Web Interface](https://google.github.io/adk-docs/deploy/local/)

@@ -2,35 +2,59 @@
 
 ## Overview
 
-The Product Management Agent implements a hierarchical multi-agent system using Google's Agent Development Kit (ADK). The system processes product ideas through three specialized stages in a sequential workflow.
+The Product Management Agent is a hierarchical multi-agent system that creates comprehensive Product Requirements Documents (PRDs) through a sequential workflow with two human-in-the-loop (HITL) confirmation points. The system integrates with a custom MCP server for PRD storage and retrieval.
 
-## Agent Hierarchy
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│              root_agent                              │
-│         (Main Orchestrator)                          │
-│         gemini-2.5-flash                            │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 ├─► Initiates workflow
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────┐
-│      virtual_product_manager_agent                   │
-│         (SequentialAgent)                            │
-└────────────────┬────────────────────────────────────┘
-                 │
-                 ├─► Sequential Execution
-                 │
-    ┌────────────┼────────────┐
-    │            │            │
-    ▼            ▼            ▼
-┌─────────┐  ┌─────────┐  ┌──────────┐
-│ Market  │  │  User   │  │   PRD    │
-│Research │─►│ Journey │─►│ Scripter │
-│  Agent  │  │  Agent  │  │  Agent   │
-└─────────┘  └─────────┘  └──────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     User Request                          │
+│              "Create PRD for [product idea]"             │
+└───────────────────────┬──────────────────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────────────────┐
+│                   root_agent                              │
+│              (Main Orchestrator)                          │
+│               gemini-2.5-flash                            │
+│                                                           │
+│  Tools:                                                   │
+│  - search_existing_prds (MCP)                            │
+│  - get_prd (MCP)                                         │
+│  - read_prd_from_temp                                    │
+│  - store_prd (MCP)                                       │
+└───────────────────────┬───────────────────────────────────┘
+                        │
+            ┌───────────┴──────────────┐
+            │                          │
+       HITL #1                    HITL #2
+   Duplicate Check             PRD Approval
+            │                          │
+            ▼                          ▼
+┌─────────────────────────┐  ┌──────────────────────┐
+│  MCP Server Query       │  │  Save to Storage     │
+│  (Search existing PRDs) │  │  (Dual-format)       │
+└─────────────────────────┘  └──────────────────────┘
+            │
+            ▼
+┌───────────────────────────────────────────────────────────┐
+│         virtual_product_manager_agent                     │
+│              (SequentialAgent)                            │
+│                                                           │
+│  Sequential Workflow:                                     │
+│    market_researcher → user_journey → prd_scripter       │
+└───────────────────────┬───────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        │               │               │
+        ▼               ▼               ▼
+   ┌─────────┐    ┌──────────┐    ┌──────────┐
+   │ Market  │    │   User   │    │   PRD    │
+   │Research │───►│  Journey │───►│ Scripter │
+   │ Agent   │    │  Agent   │    │  Agent   │
+   └─────────┘    └──────────┘    └──────────┘
+   gemini-flash   gemini-pro      gemini-pro
+   google_search
 ```
 
 ## Agents
@@ -38,39 +62,155 @@ The Product Management Agent implements a hierarchical multi-agent system using 
 ### Root Agent
 - **Model**: gemini-2.5-flash
 - **Type**: Agent
-- **Purpose**: Main orchestrator that initiates the workflow
-- **Transfers to**: virtual_product_manager_agent
+- **Purpose**: Main orchestrator implementing HITL workflow
+- **Workflow**:
+  1. **Duplicate Detection** (HITL #1)
+     - Searches for existing similar PRDs using `search_existing_prds`
+     - If found, asks user to view existing or create new
+     - Waits for user confirmation
+
+  2. **PRD Generation**
+     - Delegates to `virtual_product_manager_agent` (SequentialAgent)
+     - Sequential execution of market research, user journeys, PRD writing
+
+  3. **User Approval** (HITL #2)
+     - Receives completed PRD from PRD Scripter
+     - Presents PRD to user
+     - Waits for user confirmation before saving
+
+  4. **Storage**
+     - Reads PRD from temporary file (`/tmp/temp_prd_draft.md`)
+     - Calls `store_prd` to save to MCP server
+     - Returns shareable HTML URL to user
 
 ### Virtual Product Manager Agent
 - **Type**: SequentialAgent
-- **Purpose**: Coordinates three sub-agents in sequence
+- **Purpose**: Orchestrates three specialized agents in sequence
 - **Flow**: Output of each agent becomes input for the next
-- **Sub-agents**: market_researcher → user_journey → prd_scripter
+- **Sub-agents**:
+  1. market_researcher_agent
+  2. user_journey_agent
+  3. prd_scripter_agent
 
 ### Market Researcher Agent
 - **Model**: gemini-2.5-flash
-- **Tools**: google_search
+- **Tools**: `google_search`
 - **Purpose**:
-  - Analyze problem space
+  - Analyze the problem space
   - Identify target audience
   - Research competitors
-  - Gather external context
+  - Gather external market context
 
 ### User Journey Agent
 - **Model**: gemini-2.5-pro
 - **Purpose**:
-  - Create detailed personas
+  - Synthesize market research findings
+  - Create detailed user personas
   - Map customer journeys
-  - Identify pain points
-  - Define user needs
+  - Identify pain points and user needs
 
 ### PRD Scripter Agent
 - **Model**: gemini-2.5-pro
+- **Tools**: `write_prd_to_temp`
 - **Purpose**:
-  - Compile Product Requirements Document
+  - Compile comprehensive PRD from all previous context
   - Write problem statement
-  - Create user stories
+  - Create user stories with acceptance criteria
   - Define functional requirements
+  - Save to `/tmp/temp_prd_draft.md` for root agent
+  - Present PRD and ask for confirmation
+
+## MCP Server Integration
+
+### Architecture
+```
+┌──────────────────┐         ┌──────────────────┐
+│   PM Agent       │  HTTP   │   MCP Server     │
+│  (Agent Engine)  │◄──────►│  (Cloud Run)     │
+└──────────────────┘  SSE    └─────────┬────────┘
+                                       │
+                        ┌──────────────┼──────────────┐
+                        │              │              │
+                        ▼              ▼              ▼
+                   ┌─────────┐  ┌──────────┐  ┌─────────────┐
+                   │   GCS   │  │  Vertex  │  │   Search    │
+                   │ Storage │  │ AI Search│  │  Indexing   │
+                   └─────────┘  └──────────┘  └─────────────┘
+                   prds/*.md    prds/*.html
+                   prds/*.html
+```
+
+### MCP Tools
+
+**1. search_existing_prds**
+- Searches Vertex AI Search data store
+- Returns matching PRDs with summaries
+- Used in HITL #1 for duplicate detection
+
+**2. get_prd**
+- Retrieves full PRD content by ID
+- Returns markdown format
+- Used when user wants to view existing PRD
+
+**3. store_prd**
+- Stores PRD in dual format (markdown + HTML)
+- Uploads to Google Cloud Storage
+- Indexes HTML in Vertex AI Search
+- Returns both markdown path and HTML URL
+
+### Dual-Format Storage
+
+PRDs are stored in two formats:
+
+**Markdown (`.md`)**
+- Original PRD content
+- Editable by users
+- Used for retrieval by `get_prd`
+
+**HTML (`.html`)**
+- Converted from markdown using Python markdown library
+- Styled for web viewing
+- Indexed by Vertex AI Search (compatible MIME type)
+- Shareable URL for presentation
+
+**Storage Pattern**:
+```
+gs://bucket-name/prds/
+├── product_name_timestamp.md    # Markdown source
+└── product_name_timestamp.html  # HTML presentation
+```
+
+## Human-in-the-Loop (HITL) Patterns
+
+### HITL #1: Duplicate Prevention
+- **When**: Before starting PRD generation
+- **Purpose**: Prevent duplicate work
+- **Implementation**: Conversational confirmation
+- **Flow**:
+  1. User provides product idea
+  2. Agent searches for similar PRDs
+  3. If found, agent presents options:
+     - View existing PRD
+     - Create new PRD anyway
+     - Refine idea and search again
+  4. Agent waits for user response
+
+### HITL #2: PRD Approval
+- **When**: After PRD generation completes
+- **Purpose**: Review and approval before storage
+- **Implementation**: Conversational confirmation
+- **Flow**:
+  1. PRD Scripter presents complete PRD
+  2. PRD Scripter explicitly asks: "Would you like me to save this PRD to storage?"
+  3. Root agent waits for user confirmation
+  4. On confirmation, saves to MCP server
+
+### Artifact Handoff Pattern
+
+PRDs are passed between agents using the filesystem:
+- PRD Scripter writes to `/tmp/temp_prd_draft.md`
+- Root agent reads from `/tmp/temp_prd_draft.md`
+- This preserves PRD content across agent handoffs
 
 ## Data Flow
 
@@ -78,13 +218,17 @@ The Product Management Agent implements a hierarchical multi-agent system using 
 User Input (Product Idea)
     │
     ▼
-Root Agent (validates and routes)
+Root Agent: search_existing_prds(idea)
+    │
+    ├── Found duplicates?
+    │   ├── Yes → Present to user → Wait for decision (HITL #1)
+    │   └── No → Proceed
     │
     ▼
-Virtual PM Agent (orchestrates)
+Delegate to virtual_product_manager_agent
     │
     ├──► Market Researcher
-    │    ├─ Google Search
+    │    ├─ google_search(market research)
     │    └─ Output: Market Analysis
     │
     ▼
@@ -95,149 +239,116 @@ Virtual PM Agent (orchestrates)
     ▼
     PRD Scripter
     ├─ Input: All previous context
-    └─ Output: Complete PRD
+    ├─ write_prd_to_temp(prd_content)
+    ├─ Present PRD to user
+    └─ Ask for confirmation (HITL #2)
+    │
+    ▼
+Root Agent: Wait for user confirmation
+    │
+    ├── Approved?
+    │   ├── Yes → read_prd_from_temp()
+    │   │         store_prd(name, content, metadata)
+    │   │         Return HTML URL
+    │   └── No → Offer refinements
 ```
 
-## Key Components
+## Key Design Decisions
 
-### Sequential Execution
-
-Agents execute in order using `SequentialAgent`:
-
-```python
-SequentialAgent(
-    name="virtual_product_manager_agent",
-    sub_agents=[
-        market_researcher_agent,
-        user_journey_agent,
-        prd_scripter_agent,
-    ],
-)
-```
-
-### Shared Memory
-
-All agents share session state through VertexAiMemoryBankService:
-- Persistent across conversations
-- Enables context awareness
-- Improves response quality
-
-### Tool Integration
-
-Market researcher uses Google Search:
-```python
-Agent(
-    name="market_researcher_agent",
-    tools=[google_search],
-    ...
-)
-```
-
-### Model Selection
-
-- **gemini-2.5-flash**: Fast, cost-effective for orchestration and research
-- **gemini-2.5-pro**: Higher quality for synthesis and writing
-
-## Tracing & Observability
-
-### OpenTelemetry Integration
-
-```python
-AdkApp(
-    agent=root_agent,
-    enable_tracing=True,
-    memory_service_builder=memory_bank_service_builder
-)
-```
-
-### Cloud Trace
-
-- Automatic span creation for each agent execution
-- Performance monitoring
-- Error tracking
-- Request flow visualization
-
-## Design Decisions
-
-### Why Sequential vs Parallel?
-
-Sequential execution ensures:
-- Proper workflow order
+### Why Sequential Agents?
+- Ensures proper context flow
 - Each agent builds on previous outputs
-- Consistent context flow
+- Consistent information across PRD sections
 - Quality over speed
 
-### Why Hierarchical Structure?
+### Why Two HITL Checkpoints?
+1. **Duplicate Check**: Prevents wasted work, improves efficiency
+2. **PRD Approval**: Gives user control before committing to storage
 
-Benefits:
-- Clear separation of concerns
-- Reusable components
-- Easy to test individual agents
-- Scalable architecture
+### Why MCP Server?
+- Centralized PRD storage and retrieval
+- Separation of concerns (agent logic vs. storage)
+- Dual-format conversion (markdown → HTML)
+- Semantic search capabilities via Vertex AI Search
 
-### Why Shared Memory?
+### Why Dual-Format Storage?
+- **Markdown**: Easy editing, version control, agent retrieval
+- **HTML**: Presentation, sharing, search indexing (Vertex AI compatible)
 
-Enables:
-- Multi-turn conversations
-- Context retention
-- Improved user experience
-- Learning from past interactions
+### Why Temporary File Handoff?
+- Preserves PRD content between agent executions
+- Simple, reliable artifact sharing
+- No dependency on external state management
 
 ## Extension Points
 
 ### Adding New Agents
 
+Insert into the sequential workflow:
+
 ```python
-new_agent = Agent(
-    name="new_agent",
+competitor_analysis_agent = Agent(
+    name="competitor_analysis_agent",
     model="gemini-2.5-pro",
-    instruction="...",
-    tools=[custom_tool],
+    instruction="Analyze competitors...",
 )
 
-# Add to sequence
-SequentialAgent(
+virtual_product_manager_agent = SequentialAgent(
     sub_agents=[
         market_researcher_agent,
+        competitor_analysis_agent,  # New agent
         user_journey_agent,
-        new_agent,  # Insert here
         prd_scripter_agent,
     ],
 )
 ```
 
-### Custom Tools
+### Adding Custom Tools
 
 ```python
-from google.adk.tools import Tool
-
-def custom_api(query: str) -> str:
+def analyze_market_trends(industry: str) -> str:
     # Your implementation
     return result
 
-agent = Agent(
-    tools=[google_search, Tool(custom_api)],
+market_researcher_agent = Agent(
+    tools=[google_search, analyze_market_trends],
     ...
 )
 ```
 
+### Adding More MCP Tools
+
+Update `mcp_tool.py` to add new MCP tools:
+
+```python
+def list_all_prds() -> str:
+    """List all PRDs in the system"""
+    response = requests.post(
+        f"{MCP_SERVER_URL}/sse",
+        json={"method": "tools/call", "params": {"name": "list_all_prds"}}
+    )
+    return parse_sse_response(response)
+```
+
 ## Performance Characteristics
 
-- **Latency**: ~15-20 seconds per stage
-- **Token Usage**: ~2,500-3,000 tokens per product idea
-- **Accuracy**: High-quality outputs with grounding
-- **Scalability**: Scales with Vertex AI infrastructure
+- **Latency**: ~30-60 seconds per PRD (three sequential agents)
+- **Token Usage**: ~5,000-8,000 tokens per product idea
+- **Accuracy**: High-quality PRDs with grounded market research
+- **Scalability**: Scales with Vertex AI Agent Engine infrastructure
 
-## Security Considerations
+## Security & Privacy
 
-1. **API Keys**: Managed through Google Cloud IAM
-2. **Data Privacy**: All data stays in your GCP project
-3. **Access Control**: Configure IAM roles
-4. **Audit Logging**: Automatic via Cloud Logging
+1. **Authentication**: Service account authentication for MCP server
+2. **Authorization**: IAM roles control access to GCS and Vertex AI
+3. **Data Privacy**: All data stays within your GCP project
+4. **Audit Logging**: Automatic via Cloud Logging and Cloud Trace
+5. **No Public Access**: MCP server requires authentication (Cloud Run IAM)
 
 ## References
 
 - [ADK Agents](https://google.github.io/adk-docs/agents/)
-- [Sequential Agents](https://google.github.io/adk-docs/agents/sequential/)
-- [Tools](https://google.github.io/adk-docs/tools/)
-- [Memory](https://google.github.io/adk-docs/sessions/memory/)
+- [Sequential Agents](https://google.github.io/adk-docs/agents/multi-agents/)
+- [Tools & Functions](https://google.github.io/adk-docs/tools/)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Vertex AI Search](https://cloud.google.com/generative-ai-app-builder/docs/introduction)
