@@ -54,13 +54,29 @@ def deploy_agent():
             location=LOCATION
         )
 
-    # Create ADK app with memory and tracing
-    print("Creating ADK app with memory and tracing enabled...")
+    # Create ADK app with memory (tracing now configured via env vars)
+    print("Creating ADK app with memory service...")
     app = reasoning_engines.AdkApp(
         agent=root_agent,
-        enable_tracing=True,
         memory_service_builder=memory_bank_service_builder
     )
+
+    # Environment variables for the deployed agent
+    env_vars = {
+        # Tracing configuration (new standard as of Jan 2026)
+        "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "true",
+
+        # MCP Server configuration
+        "MCP_SERVER_URL": os.getenv("MCP_SERVER_URL"),
+        "GOOGLE_CLOUD_PROJECT": PROJECT,
+        "GOOGLE_CLOUD_LOCATION": LOCATION,
+    }
+
+    print("Environment variables for deployment:")
+    for key, value in env_vars.items():
+        print(f"  {key}: {value}")
+    print()
 
     # Deploy to Agent Engine
     print("Deploying to Agent Engine...")
@@ -72,7 +88,8 @@ def deploy_agent():
             "google-cloud-aiplatform[adk,agent_engines]>=1.112",
         ],
         extra_packages=[os.path.join(os.path.dirname(__file__), "..", "pm_agent", "agent.py")],
-        sys_version="3.13"
+        sys_version="3.13",
+        env_vars=env_vars
     )
 
     print("\n" + "=" * 60)

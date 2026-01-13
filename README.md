@@ -188,6 +188,8 @@ gcloud services enable aiplatform.googleapis.com
 gcloud services enable run.googleapis.com
 gcloud services enable storage.googleapis.com
 gcloud services enable discoveryengine.googleapis.com
+gcloud services enable telemetry.googleapis.com  # For tracing
+gcloud services enable logging.googleapis.com     # For logs
 ```
 
 ### Deployment
@@ -229,7 +231,22 @@ cp .env.example .env
 # - MCP_SERVER_URL=https://your-mcp-server.run.app
 ```
 
-**Step 3: Deploy PM Agent**
+**Step 3: Create Deployment Environment File**
+
+Create `deployment.env` with tracing and MCP server configuration:
+
+```bash
+cd ..
+cat > deployment.env <<EOF
+GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+MCP_SERVER_URL=https://your-mcp-server.run.app
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+EOF
+```
+
+**Step 4: Deploy PM Agent**
 
 ```bash
 adk deploy agent_engine \
@@ -237,12 +254,14 @@ adk deploy agent_engine \
   --region=us-central1 \
   --staging_bucket=gs://your-staging-bucket \
   --display_name="Product Management Agent" \
-  --description="AI PM agent with sequential workflow" \
-  --trace_to_cloud \
+  --description="AI PM agent with sequential workflow and tracing" \
+  --env_file=deployment.env \
   pm_agent
 ```
 
-**Step 4: Register to Gemini Enterprise** (Optional)
+> **Note**: Environment variables are the new standard for enabling tracing as of January 2026. The deprecated `--trace_to_cloud` flag is no longer recommended.
+
+**Step 5: Register to Gemini Enterprise** (Optional)
 
 1. Go to [Gemini Enterprise Console](https://console.cloud.google.com/gemini/enterprise)
 2. Click "Register Agent"
@@ -312,6 +331,7 @@ Agent: Found 3 matching PRDs:
 
 ### PM Agent Environment Variables
 
+**For local development** (`pm_agent/.env`):
 ```bash
 # Backend selection
 GOOGLE_GENAI_USE_VERTEXAI=1
@@ -323,6 +343,20 @@ GOOGLE_CLOUD_STAGING_BUCKET=gs://your-staging-bucket
 
 # MCP Server URL (from deployment)
 MCP_SERVER_URL=https://your-mcp-server.run.app
+```
+
+**For Agent Engine deployment** (`deployment.env`):
+```bash
+# Tracing configuration (new standard as of Jan 2026)
+GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true
+OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+
+# MCP Server URL
+MCP_SERVER_URL=https://your-mcp-server.run.app
+
+# GCP Configuration (optional if passed via --project and --region flags)
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
 ```
 
 ### MCP Server Environment Variables
@@ -352,16 +386,21 @@ adk deploy agent_engine \
   --region=us-central1 \
   --staging_bucket=gs://your-staging-bucket \
   --display_name="Product Management Agent" \
-  --trace_to_cloud \
+  --env_file=deployment.env \
   pm_agent
 ```
 
 ### Monitoring
 
-**View traces:**
+**View traces in Cloud Trace:**
 ```
 https://console.cloud.google.com/traces/list?project=your-project-id
 ```
+
+**View traces in Vertex AI console:**
+1. Go to https://console.cloud.google.com/vertex-ai/reasoning-engines?project=your-project-id
+2. Click on your reasoning engine
+3. Navigate to the "Traces" tab
 
 **Check logs:**
 ```bash

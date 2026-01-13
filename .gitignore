@@ -19,6 +19,7 @@ ENV/
 # Environment files
 .env
 */.env
+deployment.env
 
 # IDE
 .vscode/
